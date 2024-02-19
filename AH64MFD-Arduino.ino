@@ -47,6 +47,8 @@ auto          g_axis = Array<AnalogAxis* const, static_cast<size_t>(EAxis::SIZE_
 // Entry point
 void setup()
 {
+    pinMode(LED_BUILTIN_RX, OUTPUT);
+    digitalWrite(LED_BUILTIN_RX, LOW);
     const uint16_t RESET_DELAY = 250;
     delay(RESET_DELAY);
 
@@ -186,6 +188,7 @@ void toggleCalibrationMode()
                 Serial.write(g_serialBuffer);
             }
         }
+        digitalWrite(LED_BUILTIN_RX, LOW);
     }
 }
 
@@ -263,6 +266,19 @@ void loop()
     else if (g_mode == EModes::SERIAL_MODE)
     {
         debugOutputButtonStates();
+    }
+    else if (g_mode == EModes::CALIBRATION_MODE)
+    {
+        static const uint32_t CALIBRATION_BLINK_RATE_MS = 500U;
+        static uint32_t       lastMillis;
+        static bool           state         = false;
+        const uint32_t        TIME_ELAPSED = millis();
+        if (TIME_ELAPSED - lastMillis > CALIBRATION_BLINK_RATE_MS)
+        {
+            state = !state;
+            digitalWrite(LED_BUILTIN_RX, static_cast<uint8_t>(state));
+            lastMillis = TIME_ELAPSED;
+        }
     }
     else
     {

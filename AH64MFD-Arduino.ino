@@ -80,71 +80,95 @@ void setup()
     }
 }
 
-// Reads an axis and handles the value according to g_mode.
-void handleAxis()
+void handleAxisGamepadMode()
 {
     uint8_t axisIdx = 0;
-    if (g_mode == EModes::GAMEPAD_MODE)
+    for (AnalogAxis* const ptr_axis : g_axis)
     {
-        for (AnalogAxis* const ptr_axis : g_axis)
+        ptr_axis->read();
+
+        if (static_cast<EAxis>(axisIdx) == EAxis::BRT)
         {
-            ptr_axis->read();
-            if (static_cast<EAxis>(axisIdx) == EAxis::BRT)
-            {
-                Gamepad.rxAxis(static_cast<int16_t>(ptr_axis->get()));
-            }
-            else
-            {
-                Gamepad.ryAxis(static_cast<int16_t>(ptr_axis->get()));
-            }
-            axisIdx++;
+            Gamepad.rxAxis(static_cast<int16_t>(ptr_axis->get()));
         }
-        return;
+        else
+        {
+            Gamepad.ryAxis(static_cast<int16_t>(ptr_axis->get()));
+        }
+        axisIdx++;
+    }
+}
+
+void handleAxisSerialMode()
+{
+    uint8_t axisIdx = 0;
+
+    for (AnalogAxis* const ptr_axis : g_axis)
+    {
+        const double   PERCENT = 100.0 * (static_cast<double>(ptr_axis->get()) / AnalogAxis::GAMEPAD_ANALOG_MAX);
+        const uint16_t WRITTEN = sprintf(
+          g_serialBuffer,
+          "%s Calibrated Value: %x / %x (%.2f %%)  |  RAW: %x\n",
+          (static_cast<EAxis>(axisIdx) == EAxis::BRT) ? "BRT" : "VID",
+          ptr_axis->get(),
+          AnalogAxis::GAMEPAD_ANALOG_MAX,
+          PERCENT,
+          ptr_axis->getRaw()
+        );
+        if (WRITTEN >= BUFFER_SIZE)
+        {
+            error("Buffer overrun.", true);
+        }
+        Serial.write(g_serialBuffer);
+        axisIdx++;
+    }
+}
+
+// Reads an axis and handles the value according to g_mode.
+[[nodiscard]]
+auto handleAxis() -> bool
+{
+    static Array<uint16_t, static_cast<size_t>(EAxis::SIZE_)> lastAxisValues;
+    bool                                                      hasChanged = false;
+
+    uint8_t                                                   axisIdx    = 0;
+    for (AnalogAxis* const ptr_axis : g_axis)
+    {
+        ptr_axis->read();
+
+        if (abs(ptr_axis->getRaw() - lastAxisValues[axisIdx]) > 1U)
+        {
+            lastAxisValues[axisIdx] = ptr_axis->getRaw();
+            hasChanged              = true;
+        }
+
+        axisIdx++;
     }
 
-    if (g_mode == EModes::CALIBRATION_MODE)
+    if (g_mode == EModes::GAMEPAD_MODE)
+    {
+        handleAxisGamepadMode();
+    }
+    else if (g_mode == EModes::CALIBRATION_MODE)
     {
         for (AnalogAxis* const ptr_axis : g_axis)
         {
             ptr_axis->calibrate();
         }
-        return;
     }
-
-    if (g_mode == EModes::SERIAL_MODE)
+    else if (g_mode == EModes::SERIAL_MODE)
     {
-        static Array<uint16_t, static_cast<size_t>(EAxis::SIZE_)> lastAxisValues;
-        for (AnalogAxis* const ptr_axis : g_axis)
+        if (hasChanged)
         {
-            ptr_axis->read();
-
-            if (ptr_axis->get() != lastAxisValues[axisIdx])
-            {
-                const double PERCENT = 100.0 * (static_cast<double>(ptr_axis->get()) / AnalogAxis::GAMEPAD_ANALOG_MAX);
-                const uint16_t WRITTEN = sprintf(
-                  g_serialBuffer,
-                  "%s Calibrated Value: %x / %x (%.2f %%)  |  RAW: %x\n",
-                  (static_cast<EAxis>(axisIdx) == EAxis::BRT) ? "BRT" : "VID",
-                  ptr_axis->get(),
-                  AnalogAxis::GAMEPAD_ANALOG_MAX,
-                  PERCENT,
-                  ptr_axis->getRaw()
-                );
-                if (WRITTEN >= BUFFER_SIZE)
-                {
-                    error("Buffer overrun.", true);
-                }
-                Serial.write(g_serialBuffer);
-
-                lastAxisValues[axisIdx] = ptr_axis->get();
-            }
-            axisIdx++;
+            handleAxisSerialMode();
         }
     }
     else
     {
-        // Empty
+        // empty
     }
+
+    return hasChanged;
 }
 
 // Toggles calibration mode on/off
@@ -238,8 +262,10 @@ void loop()
     // Read buttons
     g_buttonMatrix.read();
 
+    static uint32_t lastButtonStateSent;
+
     // when WPN and FAV buttons are pressed at the same time, enter calibration procedure
-    auto isCalibrationButtonsPressed = []() -> bool
+    auto            isCalibrationButtonsPressed = []() -> bool
     {
         return g_buttonMatrix.get(ButtonMatrix::EButtons::FAV) == ButtonMatrix::EButtonStates::CLOSED
                && g_buttonMatrix.get(ButtonMatrix::EButtons::WPN) == ButtonMatrix::EButtonStates::CLOSED;
@@ -256,12 +282,18 @@ void loop()
         toggleCalibrationMode();
     }
 
-    handleAxis();
+    bool axisUpdate = handleAxis();
 
     if (g_mode == EModes::GAMEPAD_MODE)
     {
         Gamepad.buttons(g_buttonMatrix.get());
-        Gamepad.write();
+
+        // only send a new report when something has actually changed.
+        if (axisUpdate || lastButtonStateSent != g_buttonMatrix.get())
+        {
+            Gamepad.write();    // extremely slow
+            lastButtonStateSent = g_buttonMatrix.get();
+        }
     }
     else if (g_mode == EModes::SERIAL_MODE)
     {
@@ -271,7 +303,7 @@ void loop()
     {
         static const uint32_t CALIBRATION_BLINK_RATE_MS = 500U;
         static uint32_t       lastMillis;
-        static bool           state         = false;
+        static bool           state        = false;
         const uint32_t        TIME_ELAPSED = millis();
         if (TIME_ELAPSED - lastMillis > CALIBRATION_BLINK_RATE_MS)
         {

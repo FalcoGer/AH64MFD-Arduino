@@ -3,8 +3,9 @@
 #include <Arduino.h>
 
 #include "Array.h"
+#include "Singleton.h"
 
-class ButtonMatrix
+class ButtonMatrix : public Singleton<ButtonMatrix>
 {
   public:
     // clang-format off
@@ -81,6 +82,8 @@ class ButtonMatrix
         }
     }
 
+  private:
+    friend class Singleton<ButtonMatrix>;
     ButtonMatrix()
     {
         pinMode(PIN_MUX_INHIBIT, OUTPUT);
@@ -97,6 +100,8 @@ class ButtonMatrix
             digitalWrite(PIN, LOW);
         }
     }
+
+  public:
 
     [[nodiscard]]
     auto get() const noexcept -> uint32_t

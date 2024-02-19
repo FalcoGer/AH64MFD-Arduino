@@ -17,8 +17,7 @@ enum class EModes : uint8_t
 {
     INIT_MODE,
     SERIAL_MODE,
-    GAMEPAD_MODE,
-    CALIBRATION_MODE
+    GAMEPAD_MODE
 };
 
 enum class EAxis : uint8_t
@@ -32,15 +31,11 @@ const size_t  BUFFER_SIZE                 = 128;
 // NOLINTNEXTLINE(modernize-avoid-c-arrays) // must be a char array for sprintf and Serial.Write.
 char          g_serialBuffer[BUFFER_SIZE] = {};
 EModes        g_mode                      = EModes::INIT_MODE;
-ButtonMatrix  g_buttonMatrix {};
 const uint8_t PIN_ANALOG_BRT = PIN_A1;
 const uint8_t PIN_ANALOG_VID = PIN_A0;
 
-// clang-format off
-const uint16_t ANALOG_MAX_VALUE = 0b1111111111;    // 10 bit max value = 1023
-// clang-format on
-AnalogAxis    g_brtAxis(PIN_ANALOG_BRT, 0U, ANALOG_MAX_VALUE);
-AnalogAxis    g_vidAxis(PIN_ANALOG_VID, 0U, ANALOG_MAX_VALUE);
+AnalogAxis    g_brtAxis(PIN_ANALOG_BRT);
+AnalogAxis    g_vidAxis(PIN_ANALOG_VID);
 auto          g_axis = Array<AnalogAxis* const, static_cast<size_t>(EAxis::SIZE_)>({&g_brtAxis, &g_vidAxis});
 }    // namespace
 
@@ -52,13 +47,13 @@ void setup()
     const uint16_t RESET_DELAY = 250;
     delay(RESET_DELAY);
 
-    g_buttonMatrix.read();
+    ButtonMatrix::Inst().read();
 
     // Check if FAV and FCR are pressed at the same time
     // If they are during startup, this enables serial mode for debugging
 
-    g_mode = (g_buttonMatrix.get(ButtonMatrix::EButtons::FCR) == ButtonMatrix::EButtonStates::CLOSED
-              && g_buttonMatrix.get(ButtonMatrix::EButtons::FAV) == ButtonMatrix::EButtonStates::CLOSED)
+    g_mode = (ButtonMatrix::Inst().get(ButtonMatrix::EButtons::FCR) == ButtonMatrix::EButtonStates::CLOSED
+              && ButtonMatrix::Inst().get(ButtonMatrix::EButtons::FAV) == ButtonMatrix::EButtonStates::CLOSED)
                ? EModes::SERIAL_MODE
                : EModes::GAMEPAD_MODE;
 
@@ -149,13 +144,6 @@ auto handleAxis() -> bool
     {
         handleAxisGamepadMode();
     }
-    else if (g_mode == EModes::CALIBRATION_MODE)
-    {
-        for (AnalogAxis* const ptr_axis : g_axis)
-        {
-            ptr_axis->calibrate();
-        }
-    }
     else if (g_mode == EModes::SERIAL_MODE)
     {
         if (hasChanged)
@@ -171,56 +159,11 @@ auto handleAxis() -> bool
     return hasChanged;
 }
 
-// Toggles calibration mode on/off
-void toggleCalibrationMode()
-{
-    static EModes lastMode = g_mode;
-    if (g_mode == EModes::SERIAL_MODE)
-    {
-        Serial.write("Entering calibration mode.\n");
-    }
-    if (g_mode != EModes::CALIBRATION_MODE)
-    {
-        lastMode = g_mode;
-        g_mode   = EModes::CALIBRATION_MODE;
-
-        for (AnalogAxis* const ptr_axis : g_axis)
-        {
-            ptr_axis->startCalibration();
-        }
-    }
-    else
-    {
-        g_mode = lastMode;
-        if (g_mode == EModes::SERIAL_MODE)
-        {
-            Serial.write("Leaving calibration mode.\n");
-            uint8_t axisIdx = 0;
-            for (const AnalogAxis* const ptr_axis : g_axis)
-            {
-                const uint16_t WRITTEN = sprintf(
-                  g_serialBuffer,
-                  "Cal data %s: %d / %d\n",
-                  (static_cast<EAxis>(axisIdx) == EAxis::BRT ? "BRT" : "VID"),
-                  ptr_axis->getCalibrationLow(),
-                  ptr_axis->getCalibrationHigh()
-                );
-                if (WRITTEN >= BUFFER_SIZE)
-                {
-                    error("Buffer overrun.", true);
-                }
-                Serial.write(g_serialBuffer);
-            }
-        }
-        digitalWrite(LED_BUILTIN_RX, LOW);
-    }
-}
-
 // Outputs the button states to the serial console if they have changed since the last time.
 void debugOutputButtonStates()
 {
     static uint32_t lastStateDisplayed;
-    const uint32_t  STATE = g_buttonMatrix.get();
+    const uint32_t  STATE = ButtonMatrix::Inst().get();
 
     if (lastStateDisplayed == STATE)
     {
@@ -260,57 +203,32 @@ void debugOutputButtonStates()
 void loop()
 {
     // Read buttons
-    g_buttonMatrix.read();
+    ButtonMatrix::Inst().read();
 
     static uint32_t lastButtonStateSent;
-
-    // when WPN and FAV buttons are pressed at the same time, enter calibration procedure
-    auto            isCalibrationButtonsPressed = []() -> bool
-    {
-        return g_buttonMatrix.get(ButtonMatrix::EButtons::FAV) == ButtonMatrix::EButtonStates::CLOSED
-               && g_buttonMatrix.get(ButtonMatrix::EButtons::WPN) == ButtonMatrix::EButtonStates::CLOSED;
-    };
-
-    if (isCalibrationButtonsPressed())
-    {
-        // wait for the buttons to no longer be pressed
-        while (isCalibrationButtonsPressed())
-        {
-            delay(1);    // delay first for debouncing
-            g_buttonMatrix.read();
-        }
-        toggleCalibrationMode();
-    }
 
     bool axisUpdate = handleAxis();
 
     if (g_mode == EModes::GAMEPAD_MODE)
     {
-        Gamepad.buttons(g_buttonMatrix.get());
+        Gamepad.buttons(ButtonMatrix::Inst().get());
 
+        static uint32_t lastReportSentTime = 0;
+        // clang-format off
+        static const uint32_t MAX_TIME_BETWEEN_REPORTS_IN_MS = 5000;
+        // clang-format on
+        const uint32_t ELAPSED_TIME = millis();
         // only send a new report when something has actually changed.
-        if (axisUpdate || lastButtonStateSent != g_buttonMatrix.get())
+        if (axisUpdate || lastButtonStateSent != ButtonMatrix::Inst().get() || (ELAPSED_TIME - lastReportSentTime >= MAX_TIME_BETWEEN_REPORTS_IN_MS))
         {
             Gamepad.write();    // extremely slow
-            lastButtonStateSent = g_buttonMatrix.get();
+            lastButtonStateSent = ButtonMatrix::Inst().get();
+            lastReportSentTime = ELAPSED_TIME;
         }
     }
     else if (g_mode == EModes::SERIAL_MODE)
     {
         debugOutputButtonStates();
-    }
-    else if (g_mode == EModes::CALIBRATION_MODE)
-    {
-        static const uint32_t CALIBRATION_BLINK_RATE_MS = 500U;
-        static uint32_t       lastMillis;
-        static bool           state        = false;
-        const uint32_t        TIME_ELAPSED = millis();
-        if (TIME_ELAPSED - lastMillis > CALIBRATION_BLINK_RATE_MS)
-        {
-            state = !state;
-            digitalWrite(LED_BUILTIN_RX, static_cast<uint8_t>(state));
-            lastMillis = TIME_ELAPSED;
-        }
     }
     else
     {

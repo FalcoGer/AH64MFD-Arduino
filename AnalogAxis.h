@@ -5,9 +5,7 @@
 class AnalogAxis
 {
   private:
-    uint8_t  m_analogPin;
-    uint16_t m_calibrationLow;
-    uint16_t m_calibrationHigh;
+    uint8_t m_analogPin;
 
     uint16_t m_calibrated {};
     uint16_t m_raw {};
@@ -25,24 +23,10 @@ class AnalogAxis
     ~AnalogAxis()                                     = default;
 
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    AnalogAxis(const uint8_t PIN, const uint16_t CALIBRATION_LOW, const uint16_t CALIBRATION_HIGH)
-            : m_analogPin {PIN}, m_calibrationLow {CALIBRATION_LOW}, m_calibrationHigh {CALIBRATION_HIGH}
+    explicit AnalogAxis(const uint8_t PIN)
+            : m_analogPin {PIN}
     {
         pinMode(PIN, INPUT);
-    }
-
-    void startCalibration() noexcept
-    {
-        const uint16_t VALUE = analogRead(m_analogPin);
-        m_calibrationLow     = VALUE;
-        m_calibrationHigh    = VALUE;
-    }
-
-    void calibrate() noexcept
-    {
-        const uint16_t VALUE = analogRead(m_analogPin);
-        m_calibrationLow     = min(m_calibrationLow, VALUE);
-        m_calibrationHigh    = max(m_calibrationHigh, VALUE);
     }
 
     [[nodiscard]]
@@ -57,43 +41,26 @@ class AnalogAxis
         return m_raw;
     }
 
-    [[nodiscard]]
-    auto getCalibrationLow() const noexcept -> uint16_t
-    {
-        return m_calibrationLow;
-    }
-
-    [[nodiscard]]
-    auto getCalibrationHigh() const noexcept -> uint16_t
-    {
-        return m_calibrationHigh;
-    }
-
     void read() noexcept
     {
         m_raw = analogRead(m_analogPin);
 
-        if (m_calibrationLow == m_calibrationHigh)
-        {
-            m_calibrated = GAMEPAD_ANALOG_MAX;
-        }
-
-        if (m_raw < m_calibrationLow)
+        if (m_raw < 0)
         {
             m_calibrated = 0;
+            return;
         }
 
-        if (m_raw > m_calibrationHigh)
+        if (m_raw > ANALOG_MAX_VALUE)
         {
             m_calibrated = GAMEPAD_ANALOG_MAX;
+            return;
         }
 
-        // normalize value from value in [low .. high] to [0 .. GAMEPAD_ANALOG_MAX]
-        // div by 2 because only need positive values.
-        m_calibrated = static_cast<uint16_t>(
-          ((static_cast<int32_t>(m_raw - m_calibrationLow) * GAMEPAD_ANALOG_MAX)
-           / (m_calibrationHigh - m_calibrationLow))
-          - ((static_cast<int32_t>(GAMEPAD_ANALOG_MAX) / 2) + 1)
-        );
+        // 0000 0011 1111 1111  // max raw value is 10 bits
+        // Map 10-bit range [0, 1023] to 16-bit range [-32768, 32767]
+        // Map 10-bit range [0x000, 0x3FF] to 16-bit range [0x8000, 0x7FFF]
+        static const auto INT16_MIN_VAL = static_cast<int16_t>(0x8000);
+        m_calibrated = static_cast<int16_t>((static_cast<uint32_t>(m_raw) * GAMEPAD_ANALOG_MAX / ANALOG_MAX_VALUE) - INT16_MIN_VAL);
     }
 };

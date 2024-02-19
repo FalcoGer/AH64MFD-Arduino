@@ -3,7 +3,6 @@
 #include <Arduino.h>
 
 #include "Array.h"
-#include "USBAPI.h"
 
 class ButtonMatrix
 {

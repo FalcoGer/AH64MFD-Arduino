@@ -8,9 +8,11 @@ set(CMAKE_TOOLCHAIN_FILE "/home/paul/repositories/arduino/Arduino-CMake-Toolchai
 set(ARDUINO_INSTALL_PATH "/home/paul/repositories/arduino/arduino-ide/build")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
+
 project (AH64MFDController CXX)
 
-add_executable(AH64MFDController lnk/MFDController.cpp)
+add_executable(AH64MFDController lnk/AH64MFD-Arduino.cpp)
 
 target_link_arduino_libraries(AH64MFDController PRIVATE HID HID-Project core)
 

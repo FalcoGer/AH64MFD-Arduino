@@ -18,6 +18,12 @@ class AnalogAxis
     static const uint16_t ANALOG_MAX_VALUE = 0b1111111111;    // 10 bit max value = 1023
     // clang-format on
 
+    AnalogAxis(const AnalogAxis&)                     = delete;
+    AnalogAxis(AnalogAxis&&)                          = delete;
+    auto operator= (const AnalogAxis&) -> AnalogAxis& = delete;
+    auto operator= (AnalogAxis&&) -> AnalogAxis&      = delete;
+    ~AnalogAxis()                                     = default;
+
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     AnalogAxis(const uint8_t PIN, const uint16_t CALIBRATION_LOW, const uint16_t CALIBRATION_HIGH)
             : m_analogPin {PIN}, m_calibrationLow {CALIBRATION_LOW}, m_calibrationHigh {CALIBRATION_HIGH}

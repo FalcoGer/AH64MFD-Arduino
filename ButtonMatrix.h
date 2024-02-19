@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "Array.h"
+#include "USBAPI.h"
 
 class ButtonMatrix
 {
@@ -17,20 +18,30 @@ class ButtonMatrix
         SIZE_ // NOLINT(readability-identifier-naming)
     };
     // clang-format on
+    static const uint8_t NUMBER_OF_BUTTONS                = static_cast<uint8_t>(EButtons::SIZE_);
 
   private:
-    uint32_t                       m_states {};
+    Array<bool, NUMBER_OF_BUTTONS> m_states;
 
-    static const uint8_t           PIN_MUX_INHIBIT = 6;     // D6 goes to 4051 Inhibit (NOT_ENABLE) input
-    static const uint8_t           PIN_MUX_COMMON  = 10;    // D10 goes to 4051 X/Common input/output.
-    static const Array<uint8_t, 3> MUX_ADDR_PINS;
-    static const Array<uint8_t, 4> BTN_MATRIX_PINS;
+    static const uint8_t    PIN_MUX_INHIBIT = 6;     // D6 goes to 4051 Inhibit (NOT_ENABLE) input
+    static const uint8_t    PIN_MUX_COMMON  = 10;    // D10 goes to 4051 X/Common input/output.
+    const Array<uint8_t, 3> MUX_ADDR_PINS   = {
+      static_cast<uint8_t>(9),                     // D9 goes to 4051 A input
+      static_cast<uint8_t>(8),                     // D8 goes to 4051 B input
+      static_cast<uint8_t>(7)                      // D7 goes to 4051 C input
+    };
+    const Array<uint8_t, 4> BTN_MATRIX_PINS = {
+      static_cast<uint8_t>(2),    // D2 connects to First row of button matrix (T1-T6, R1-R2)
+      static_cast<uint8_t>(3),    // D3 connects to Second row of button matrix (R3-R6, B1-B4)
+      static_cast<uint8_t>(4),    // D4 connects to Third row of button matrix (B5-B6, L1-L6)
+      static_cast<uint8_t>(5)     // D5 connects to Fourth row of button matrix
+                                  // (Fav, Vid, Com, AC, TSD, WPN, FCR, notConnected)
+    };
 
-    static const uint8_t           NUMBER_OF_MUX_ADDRESSES = 1U << 3U;
-    static const uint16_t          MUX_SETTLE_DELAY        = 1;    // Datasheet timing is in ns.
-    static const uint16_t          READ_DELAY              = 1;
+    static const uint8_t  NUMBER_OF_MUX_ADDRESSES = 1U << 3U;
+    static const uint16_t READ_DELAY_US           = 10U;
 
-    static void                    SetMuxAddr(const uint8_t ADDR) noexcept
+    void                  setMuxAddr(const uint8_t ADDR) noexcept
     {
         digitalWrite(PIN_MUX_INHIBIT, HIGH);
 
@@ -42,24 +53,15 @@ class ButtonMatrix
         }
 
         digitalWrite(PIN_MUX_INHIBIT, LOW);
-
-        delay(MUX_SETTLE_DELAY);
-    }
-
-    void setBit(const uint8_t BIT, const bool VALUE) noexcept
-    {
-        if (VALUE)
-        {
-            m_states |= (1U << BIT);
-        }
-        else
-        {
-            m_states &= ~(1U << BIT);
-        }
     }
 
   public:
-    static const uint8_t NUMBER_OF_BUTTONS = static_cast<uint8_t>(EButtons::SIZE_);
+    ButtonMatrix(const ButtonMatrix&)                     = delete;
+    ButtonMatrix(ButtonMatrix&&)                          = delete;
+    auto operator= (const ButtonMatrix&) -> ButtonMatrix& = delete;
+    auto operator= (ButtonMatrix&&) -> ButtonMatrix&      = delete;
+    ~ButtonMatrix()                                       = default;
+
     ButtonMatrix()
     {
         pinMode(PIN_MUX_INHIBIT, OUTPUT);
@@ -67,6 +69,7 @@ class ButtonMatrix
         for (const auto PIN : MUX_ADDR_PINS)
         {
             pinMode(PIN, OUTPUT);
+            digitalWrite(PIN, LOW);
         }
 
         for (const auto PIN : BTN_MATRIX_PINS)
@@ -74,6 +77,8 @@ class ButtonMatrix
             pinMode(PIN, OUTPUT);
             digitalWrite(PIN, LOW);
         }
+
+        pinMode(2, OUTPUT);
     }
 
     enum class EButtonStates : uint8_t
@@ -85,13 +90,23 @@ class ButtonMatrix
     [[nodiscard]]
     auto get() const noexcept -> uint32_t
     {
-        return m_states;
+        uint32_t ret = 0U;
+        uint8_t bitNr{};
+        for (bool val : m_states)
+        {
+            if (val)
+            {
+                bitSet(ret, bitNr);
+            }
+            bitNr++;
+        }
+        return ret;
     }
 
     [[nodiscard]]
     auto get(const EButtons BUTTON) const noexcept -> EButtonStates
     {
-        return ((1U << static_cast<uint8_t>(BUTTON)) & m_states) != 0U ? EButtonStates::CLOSED : EButtonStates::OPEN;
+        return m_states[static_cast<uint8_t>(BUTTON)] ? EButtonStates::CLOSED : EButtonStates::OPEN;
     }
 
     void read() noexcept
@@ -99,21 +114,21 @@ class ButtonMatrix
         // walk backwards because wireing has logically first buttons on last address
         for (uint8_t muxAddr = 0; muxAddr < NUMBER_OF_MUX_ADDRESSES; muxAddr++)
         {
-            SetMuxAddr(muxAddr);
+            setMuxAddr(muxAddr);
             uint8_t btnRowIdx = 0;
-            for (const uint8_t BTN : BTN_MATRIX_PINS)
+            for (const uint8_t BTN_PIN : BTN_MATRIX_PINS)
             {
-                // Set the corresponding button pin to high and then check the MUX common output if the signal arrives.
-                digitalWrite(BTN, HIGH);
-                delay(READ_DELAY);
-                const bool STATE = (digitalRead(PIN_MUX_COMMON) != LOW);
-                digitalWrite(BTN, LOW);
-
                 const uint8_t BTN_IDX_LOGICAL = static_cast<uint8_t>((NUMBER_OF_MUX_ADDRESSES - 1 - muxAddr))
                                                 | static_cast<uint8_t>(btnRowIdx << MUX_ADDR_PINS.size());
-                btnRowIdx++;
+                digitalWrite(BTN_PIN, HIGH);
+                // Set the corresponding button pin to high and then check the MUX common output if the signal arrives.
+                delayMicroseconds(READ_DELAY_US);
+                const bool VALUE = digitalRead(PIN_MUX_COMMON) != LOW;
+                digitalWrite(BTN_PIN, LOW);
 
-                setBit(BTN_IDX_LOGICAL, STATE);
+                m_states[BTN_IDX_LOGICAL] = VALUE;
+
+                btnRowIdx++;
             }
         }
     }
@@ -158,18 +173,4 @@ class ButtonMatrix
             default:                      return "INVALID";
         }
     }
-};
-
-inline const Array<uint8_t, 3> ButtonMatrix::MUX_ADDR_PINS = {
-  static_cast<uint8_t>(9),    // D9 goes to 4051 A input
-  static_cast<uint8_t>(8),    // D8 goes to 4051 B input
-  static_cast<uint8_t>(7)     // D7 goes to 4051 C input
-};
-
-inline const Array<uint8_t, 4> ButtonMatrix::BTN_MATRIX_PINS = {
-  static_cast<uint8_t>(2),    // D2 connects to First row of button matrix (T1-T6, R1-R2)
-  static_cast<uint8_t>(3),    // D3 connects to Second row of button matrix (R3-R6, B1-B4)
-  static_cast<uint8_t>(4),    // D4 connects to Third row of button matrix (B5-B6, L1-L6)
-  static_cast<uint8_t>(5)     // D5 connects to Fourth row of button matrix
-                              // (Fav, Vid, Com, AC, TSD, WPN, FCR, notConnected)
 };

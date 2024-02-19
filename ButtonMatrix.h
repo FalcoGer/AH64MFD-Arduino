@@ -17,8 +17,15 @@ class ButtonMatrix
         FAV, VID, COM, AC, TSD, WPN, FCR, NOT_CONNECTED,
         SIZE_ // NOLINT(readability-identifier-naming)
     };
+
+    enum class EButtonStates : uint8_t
+    {
+        OPEN,
+        CLOSED
+    };
     // clang-format on
-    static const uint8_t NUMBER_OF_BUTTONS                = static_cast<uint8_t>(EButtons::SIZE_);
+
+    static const uint8_t NUMBER_OF_BUTTONS = static_cast<uint8_t>(EButtons::SIZE_);
 
   private:
     Array<bool, NUMBER_OF_BUTTONS> m_states;
@@ -40,6 +47,7 @@ class ButtonMatrix
 
     static const uint8_t  NUMBER_OF_MUX_ADDRESSES = 1U << 3U;
     static const uint16_t READ_DELAY_US           = 10U;
+    static const uint16_t DEBOUNCE_DELAY_US       = 50U;
 
     void                  setMuxAddr(const uint8_t ADDR) noexcept
     {
@@ -60,7 +68,19 @@ class ButtonMatrix
     ButtonMatrix(ButtonMatrix&&)                          = delete;
     auto operator= (const ButtonMatrix&) -> ButtonMatrix& = delete;
     auto operator= (ButtonMatrix&&) -> ButtonMatrix&      = delete;
-    ~ButtonMatrix()                                       = default;
+    ~ButtonMatrix()
+    {
+        pinMode(PIN_MUX_COMMON, INPUT);
+        pinMode(PIN_MUX_INHIBIT, INPUT);
+        for (const auto PIN : MUX_ADDR_PINS)
+        {
+            pinMode(PIN, INPUT);
+        }
+        for (const auto PIN : BTN_MATRIX_PINS)
+        {
+            pinMode(PIN, INPUT);
+        }
+    }
 
     ButtonMatrix()
     {
@@ -77,15 +97,7 @@ class ButtonMatrix
             pinMode(PIN, OUTPUT);
             digitalWrite(PIN, LOW);
         }
-
-        pinMode(2, OUTPUT);
     }
-
-    enum class EButtonStates : uint8_t
-    {
-        OPEN,
-        CLOSED
-    };
 
     [[nodiscard]]
     auto get() const noexcept -> uint32_t
@@ -111,25 +123,43 @@ class ButtonMatrix
 
     void read() noexcept
     {
-        // walk backwards because wireing has logically first buttons on last address
-        for (uint8_t muxAddr = 0; muxAddr < NUMBER_OF_MUX_ADDRESSES; muxAddr++)
+        // read twice in a row for debouncing.
+        Array<bool, NUMBER_OF_BUTTONS> tempStates;
+        for (uint8_t timesRead {}; timesRead < 2; timesRead++)
         {
-            setMuxAddr(muxAddr);
-            uint8_t btnRowIdx = 0;
-            for (const uint8_t BTN_PIN : BTN_MATRIX_PINS)
+            // walk backwards because wireing has logically first buttons on last address
+            for (uint8_t muxAddr = 0; muxAddr < NUMBER_OF_MUX_ADDRESSES; muxAddr++)
             {
-                const uint8_t BTN_IDX_LOGICAL = static_cast<uint8_t>((NUMBER_OF_MUX_ADDRESSES - 1 - muxAddr))
-                                                | static_cast<uint8_t>(btnRowIdx << MUX_ADDR_PINS.size());
-                digitalWrite(BTN_PIN, HIGH);
-                // Set the corresponding button pin to high and then check the MUX common output if the signal arrives.
-                delayMicroseconds(READ_DELAY_US);
-                const bool VALUE = digitalRead(PIN_MUX_COMMON) != LOW;
-                digitalWrite(BTN_PIN, LOW);
+                setMuxAddr(muxAddr);
+                uint8_t btnRowIdx = 0;
+                for (const uint8_t BTN_PIN : BTN_MATRIX_PINS)
+                {
+                    const uint8_t BTN_IDX_LOGICAL = static_cast<uint8_t>((NUMBER_OF_MUX_ADDRESSES - 1 - muxAddr))
+                                                    | static_cast<uint8_t>(btnRowIdx << MUX_ADDR_PINS.size());
+                    digitalWrite(BTN_PIN, HIGH);
+                    // Set the corresponding button pin to high and then check the MUX common output if the signal arrives.
+                    delayMicroseconds(READ_DELAY_US);
+                    const bool VALUE = digitalRead(PIN_MUX_COMMON) != LOW;
+                    digitalWrite(BTN_PIN, LOW);
 
-                m_states[BTN_IDX_LOGICAL] = VALUE;
-
-                btnRowIdx++;
+                    // simple debouncing.
+                    if (timesRead == 0)
+                    {
+                        tempStates[BTN_IDX_LOGICAL] = VALUE;
+                    }
+                    else if (tempStates[BTN_IDX_LOGICAL] == VALUE)
+                    {
+                        // still the same as the first time
+                        m_states[BTN_IDX_LOGICAL] = VALUE;
+                    }
+                    else
+                    {
+                        // was not the same, ignore
+                    }
+                    btnRowIdx++;
+                }
             }
+            delayMicroseconds(DEBOUNCE_DELAY_US);
         }
     }
 

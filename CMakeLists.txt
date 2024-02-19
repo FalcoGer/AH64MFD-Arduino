@@ -4,6 +4,7 @@ add_compile_definitions(ARDUINO=10820)
 add_compile_definitions(USBCON=1)
 
 set(CMAKE_TOOLCHAIN_FILE "/home/paul/repositories/arduino/Arduino-CMake-Toolchain/Arduino-toolchain.cmake")
+add_compile_options("-D_LIBCPP_HAS_NO_THREADS")
 
 set(ARDUINO_INSTALL_PATH "/home/paul/repositories/arduino/arduino-ide/build")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

@@ -1,13 +1,11 @@
+#include <Arduino.h>
 #include <HID-Project.h>
 #include <HID-Settings.h>
 
 #include "AnalogAxis.h"
-#include "Arduino.h"
 #include "Array.h"
 #include "ButtonMatrix.h"
-#include "USBAPI.h"
 #include "error.h"
-#include "Gamepad.h"
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables) // Embedded platform, globals are OK.
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay) // Requires the use of c functions like sprintf. Using static_cast everywhere is annoying
@@ -30,20 +28,20 @@ enum class EAxis : uint8_t
     SIZE_    // NOLINT(readability-identifier-naming)
 };
 
-const size_t   BUFFER_SIZE                 = 128;
+const size_t  BUFFER_SIZE                 = 128;
 // NOLINTNEXTLINE(modernize-avoid-c-arrays) // must be a char array for sprintf and Serial.Write.
-char           g_serialBuffer[BUFFER_SIZE] = {};
-EModes         g_mode                      = EModes::INIT_MODE;
-ButtonMatrix   g_buttonMatrix {};
-const uint8_t  PIN_ANALOG_BRT   = PIN_A1;
-const uint8_t  PIN_ANALOG_VID   = PIN_A0;
+char          g_serialBuffer[BUFFER_SIZE] = {};
+EModes        g_mode                      = EModes::INIT_MODE;
+ButtonMatrix  g_buttonMatrix {};
+const uint8_t PIN_ANALOG_BRT = PIN_A1;
+const uint8_t PIN_ANALOG_VID = PIN_A0;
 
 // clang-format off
 const uint16_t ANALOG_MAX_VALUE = 0b1111111111;    // 10 bit max value = 1023
 // clang-format on
-AnalogAxis     g_brtAxis(PIN_ANALOG_BRT, 0U, ANALOG_MAX_VALUE);
-AnalogAxis     g_vidAxis(PIN_ANALOG_VID, 0U, ANALOG_MAX_VALUE);
-auto           g_axis           = Array<AnalogAxis* const, static_cast<size_t>(EAxis::SIZE_)>({&g_brtAxis, &g_vidAxis});
+AnalogAxis    g_brtAxis(PIN_ANALOG_BRT, 0U, ANALOG_MAX_VALUE);
+AnalogAxis    g_vidAxis(PIN_ANALOG_VID, 0U, ANALOG_MAX_VALUE);
+auto          g_axis = Array<AnalogAxis* const, static_cast<size_t>(EAxis::SIZE_)>({&g_brtAxis, &g_vidAxis});
 }    // namespace
 
 // Entry point
@@ -120,7 +118,7 @@ void handleAxis()
 
             if (ptr_axis->get() != lastAxisValues[axisIdx])
             {
-                const double   PERCENT = 100.0 * (static_cast<double>(ptr_axis->get()) / AnalogAxis::GAMEPAD_ANALOG_MAX);
+                const double PERCENT = 100.0 * (static_cast<double>(ptr_axis->get()) / AnalogAxis::GAMEPAD_ANALOG_MAX);
                 const uint16_t WRITTEN = sprintf(
                   g_serialBuffer,
                   "%s Calibrated Value: %x / %x (%.2f %%)  |  RAW: %x\n",
